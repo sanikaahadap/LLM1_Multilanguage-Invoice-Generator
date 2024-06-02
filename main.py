@@ -33,18 +33,18 @@ def input_image_bytes(uploaded_file):
 
 
 # Initialize the Streamlit App
-st.set_page_config(page_title="Sanika's MultiLanguage Invoice Extractor")
+st.set_page_config(page_title="Sanika's MultiLanguage Image extractor")
 input_prompt = """
-You are an expert in understanding invoices. Please try to answer the question using the information from the uploaded
-invoice.
+You are an expert in understanding images. Please try to answer the question using the information from the uploaded
+image.
 """
 user_input_prompt = st.text_input("User Input Prompt", key="input")
-upload_image_file = st.file_uploader("Upload an Image of the Invoice", type=["jpg", "jpeg", "png"])
+upload_image_file = st.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"])
 if upload_image_file is not None:
     image = Image.open(upload_image_file)
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-submit = st.button("Find the Answer from the Invoice")
+submit = st.button("Find the Answer from the Image")
 if submit:
     input_image_data = input_image_bytes(upload_image_file)
     response = get_gemini_respone(input_prompt, input_image_data, user_input_prompt)
