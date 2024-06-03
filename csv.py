@@ -1,80 +1,124 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-import pandas as pd
 import os
 from dotenv import load_dotenv
+import fitz  # PyMuPDF
+import io
+import pandas as pd
 
-# Load environment variables
 load_dotenv()
 
-# Configure the Google Gemini API
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Load the Gemini Pro Vision Model
 model = genai.GenerativeModel('gemini-pro-vision')
 
 
-# Function to get response from Gemini model
-def get_gemini_response(input_prompt, image, user_input_prompt):
-    response = model.generate_content([input_prompt, image[0], user_input_prompt])
+def get_gemini_response(input_prompt, document):
+    response = model.generate_content([input_prompt, document])
     return response.text
 
 
-# Function to convert uploaded file to image bytes
-def input_image_bytes(uploaded_file):
+def input_document_bytes(uploaded_file):
     if uploaded_file is not None:
         bytes_data = uploaded_file.getvalue()
-        image_parts = [
-            {
-                "mime_type": uploaded_file.type,
-                "data": bytes_data
-            }
-        ]
-        return image_parts
+        if uploaded_file.type == "application/pdf":
+            # Convert PDF to images
+            pdf_document = fitz.open(stream=bytes_data, filetype="pdf")
+            images = []
+            for page_number in range(len(pdf_document)):
+                page = pdf_document.load_page(page_number)
+                pix = page.get_pixmap()
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                with io.BytesIO() as output:
+                    img.save(output, format="PNG")
+                    img_byte_array = output.getvalue()
+                    images.append({
+                        "mime_type": "image/png",
+                        "data": img_byte_array
+                    })
+            return images
+        else:
+            # For image files (jpeg, jpg, png)
+            image_parts = [
+                {
+                    "mime_type": uploaded_file.type,
+                    "data": bytes_data
+                }
+            ]
+            return image_parts
     else:
         raise FileNotFoundError("No File Uploaded")
 
 
-# Initialize the Streamlit app
-st.set_page_config(page_title="Multi-Image Data Extractor")
+def extract_details_from_document(document_data):
+    input_prompt = "Extract relevant details from this document."
+    try:
+        response = get_gemini_response(input_prompt, document_data)
+        return response
+    except Exception as e:
+        st.error(f"Error extracting details: {str(e)}")
+        return None
 
-st.title("Multi-Image Data Extractor")
-st.write("Upload images of similar type documents to extract and store information in a CSV file.")
 
-input_prompt = """
-You are an expert in understanding images. Please try to answer the question using the information from the uploaded
-image.
-"""
+def parse_details(response_text):
+    details = {}
+    lines = response_text.split('\n')
+    for line in lines:
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip()
+            value = value.strip()
+            if key in details:
+                if isinstance(details[key], list):
+                    details[key].append(value)
+                else:
+                    details[key] = [details[key], value]
+            else:
+                details[key] = value
+    return details
 
-# User input prompt
-user_input_prompt = st.text_input("User Input Prompt", key="input")
 
-# File uploader for multiple images
-uploaded_files = st.file_uploader("Upload Images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+# Initialize the Streamlit App
+st.set_page_config(page_title="Document Details Extraction App")
+st.title("Document Details Extraction")
 
-# Initialize an empty list to hold data
-data = []
+st.write("""
+Upload documents of the same type (e.g., ID cards, birth certificates) and extract common details into a CSV file.
+""")
 
-# Process each uploaded image
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        image = Image.open(uploaded_file)
-        st.image(image, caption=uploaded_file.name, use_column_width=True)
+upload_files = st.file_uploader("Upload Documents", type=["pdf", "jpg", "jpeg", "png"], accept_multiple_files=True)
 
-    if st.button("Process Images"):
-        for uploaded_file in uploaded_files:
-            input_image_data = input_image_bytes(uploaded_file)
-            response_text = get_gemini_response(input_prompt, input_image_data, user_input_prompt)
-            text_data = {"filename": uploaded_file.name, "text": response_text}
-            data.append(text_data)
+if upload_files:
+    extracted_data = []
 
-        # Convert extracted data to a DataFrame
-        df = pd.DataFrame(data)
+    for file in upload_files:
+        if file.type in ["image/jpeg", "image/jpg", "image/png"]:
+            image = Image.open(file)
+            st.image(image, caption=f"Uploaded Image: {file.name}", use_column_width=True)
+        elif file.type == "application/pdf":
+            st.write(f"Uploaded PDF: {file.name}")
 
-        # Display DataFrame
+        document_data = input_document_bytes(file)
+        for document in document_data:
+            details = extract_details_from_document(document)
+            if details:
+                parsed_details = parse_details(details)
+                extracted_data.append(parsed_details)
+
+    if extracted_data:
+        st.subheader("Extracted Details")
+        df = pd.DataFrame(extracted_data)
+
+        # Display the DataFrame
         st.write(df)
 
-        # Download button for CSV
+        # Provide a download button for the CSV
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(label="Download CSV", data=csv, file_name='extracted_data.csv', mime='text/csv')
+        st.download_button(
+            label="Download CSV",
+            data=csv,
+            file_name='extracted_details.csv',
+            mime='text/csv',
+        )
