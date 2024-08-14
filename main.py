@@ -9,7 +9,7 @@ load_dotenv()
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Load the Gemini Pro Vision Model
-model = genai.GenerativeModel('gemini-pro-vision')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 
 def get_gemini_respone(input_prompt, image, user_input_prompt):
